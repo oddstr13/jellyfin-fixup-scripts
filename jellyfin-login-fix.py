@@ -54,6 +54,8 @@ if __name__ == "__main__":
 
     for id, bguid, data in users:
         guid = decodeGUID(bytes(bguid))
+        if type(data) is bytes:
+            data = data.decode("utf-8")
         data = json.loads(data)
 
         pdir = os.path.join(XMLPATH, guid)
