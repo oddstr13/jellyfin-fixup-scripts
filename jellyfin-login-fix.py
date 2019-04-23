@@ -120,14 +120,14 @@ if __name__ == "__main__":
                     policy.getElementsByTagName('InvalidLoginAttemptCount')[0].firstChild.data = "0"
 
                 with open(policy_xml, "w") as fh:
-                    policy.writexml(fh, addindent="  ", newl="\r\n")
+                    policy.writexml(fh)
 
             if enable_local_password:
                 print("Disabling local PIN login...")
 
                 config.getElementsByTagName('EnableLocalPassword')[0].firstChild.data = "false"
                 with open(config_xml, "w") as fh:
-                    config.writexml(fh, addindent="  ", newl="\r\n")
+                    config.writexml(fh)
 
             if user_pin:
                 print("Clearing PIN code...")
