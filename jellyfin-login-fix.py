@@ -1,4 +1,7 @@
 #!/usr/bin/env python3 
+# Copyright (c) Oddstr13
+# License: MIT - https://opensource.org/licenses/MIT
+
 import json
 import sqlite3
 import os
