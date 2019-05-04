@@ -18,6 +18,9 @@ DBFILE = "/var/lib/jellyfin/data/users.db"
 def decodeGUID(b):
     return base64.b16encode(bytes([b[3], b[2], b[1], b[0], b[5], b[4], b[7], b[6]]) + b[8:]).decode("utf-8").lower()
 
+def isRunning():
+    return not os.system("ps axwwo comm --no-headers | grep -i '^jellyfin$' > /dev/null")
+
 def prompt(s, default=None):
     yes = ["y", "yes", "true", "1"]
     no  = ["n", "no", "false", "0"]
@@ -51,6 +54,12 @@ def prompt(s, default=None):
         print("Answer Yes or No!")
 
 if __name__ == "__main__":
+  # Make sure that Jellyfin is not running.
+  if isRunning():
+      print("You should stop jellyfin before running this script.")
+      print("$ systemctl stop jellyfin")
+      exit(50)
+
   with sqlite3.connect(DBFILE) as conn:
     cur = conn.cursor()
     users = cur.execute('SELECT * FROM LocalUsersv2').fetchall()
@@ -102,7 +111,7 @@ if __name__ == "__main__":
                 if not os.access(policy_xml, os.W_OK) or not os.access(config_xml, os.W_OK) or not os.access(DBFILE, os.W_OK):
                     print("ERROR: No write access to {}, {} or {}".format(config_xml, policy_xml, DBFILE))
                     print("Try running this script as the jellyfin user:")
-                    print("sudo -u {} {}".format(pwd.getpwuid(os.stat(config_xml).st_uid).pw_name, ' '.join(sys.argv)))
+                    print("sudo -u {} {}".format(pwd.getpwuid(os.stat(config_xml).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
                     exit(100)
 
         new_pass = None
@@ -110,7 +119,7 @@ if __name__ == "__main__":
             if not os.access(DBFILE, os.W_OK):
                 print("ERROR: No write access to {}".format(DBFILE))
                 print("Try running this script as the jellyfin user:")
-                print("sudo -u {} {}".format(pwd.getpwuid(os.stat(config_xml).st_uid).pw_name, ' '.join(sys.argv)))
+                print("sudo -u {} {}".format(pwd.getpwuid(os.stat(config_xml).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
                 exit(100)
             new_pass = "$SHA1${}".format(hashlib.sha1(getpass.getpass().encode("utf-8")).hexdigest().upper())
 
