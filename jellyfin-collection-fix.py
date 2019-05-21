@@ -7,44 +7,82 @@
 import os
 import sys
 import sqlite3
+import platform
+import subprocess
+
+DATA_PATHS = [
+    "/var/lib/jellyfin/data/",
+]
+
+if os.environ.get('LOCALAPPDATA'):
+    DATA_PATHS.append(os.path.join(os.environ.get('LOCALAPPDATA'), "jellyfin", "data"))
+
+if os.environ.get('XDG_DATA_HOME'):
+    DATA_PATHS.append(os.path.join(os.environ.get('XDG_DATA_HOME'), "jellyfin", "data"))
+
+if os.environ.get('HOME'):
+    DATA_PATHS.append(os.path.join(os.environ.get('HOME'), ".local", "jellyfin", "data"))
 
 
-def isRunningLinux():
-    return not os.system("ps axwwo comm --no-headers | grep -i '^jellyfin$' > /dev/null")
+# Python on msys returns 'MSYS_NT-10.0-14393' on platform.system() for some reason.
+is_windows = platform.system() == "Windows" or sys.platform in ["win32", "cygwin", "msys"]
+is_linux   = platform.system() == "Linux"
+is_macos   = platform.system() == "Darwin"
 
-if __name__ == "__main__":
-    # See which OS the user is using.
-    if sys.platform in ["win32", "cygwin"]:
-        print("WARNING: ENSURE THAT THE MEDIA SERVER IS SHUTDOWN BEFORE CONTINUING!")
-        print("Please provide the path to your Jellyfin data directory.")
-        print(r"For example, the default path is: {}".format(os.path.join(os.environ['LOCALAPPDATA'], "jellyfin")))
-        print("If you used the default installation path, just hit ENTER.")
-        DBFILE = input("> ") or os.path.join(os.environ['LOCALAPPDATA'], "jellyfin")
+class Exit(Exception): pass
 
-        DBFILE = os.path.join(DBFILE, r"data\library.db")
-        if not os.path.exists(DBFILE):
-            print("Could not find database in {}. Are you sure this is the correct path?".format(DBFILE))
-            exit(100)
+def getDB(name):
+    for dpath in DATA_PATHS:
+        dbfile = os.path.join(dpath, name + ".db")
+        if os.path.exists(dbfile):
+            return dbfile
+    return None
+
+def isRunning():
+    if is_windows:
+        return subprocess.check_output([
+            "tasklist", "-fo", "table", "-nh", "-fi", "imagename eq jellyfin.exe"
+        ]).replace(b'\xff', b'').strip().startswith(b"jellyfin.exe")
     else:
-        DBFILE = "/var/lib/jellyfin/data/library.db"
+        # busybox ps usually only accepts the w (wide) option.
+        # FIXME: Implement this in a way that is compatible with both standard and busybox `ps`
+        return not os.system("ps axwwo comm --no-headers | grep -i '^jellyfin$' > /dev/null")
 
-        # Make sure that Jellyfin is not running if the user is running linux.
-        if isRunningLinux():
-            print("You should stop jellyfin before running this script.")
+def main(dbfile=None, *args):
+    if args:
+        print("Ignoring extra arguments: {}".format(', '.join(args)))
+
+    # Make sure that Jellyfin is not running
+    if isRunning():
+        print("You should stop Jellyfin before running this script.")
+        if is_linux:
             print("$ systemctl stop jellyfin")
-            exit(50)
+        raise Exit("Jellyfin is running")
+
+    # Locate the library database
+    if dbfile is None:
+        dbfile = getDB("library")
+    
+    if dbfile is None:
+        print("ERROR: Unable to locate the Jellyfin library database.")
+        print("Please supply the file `library.db` as a command line parameter,")
+        print("or drag-drop the db file on top of this script.")
+        raise Exit("Unable to locate database file")
+    
+    print("Attempting to use database `{}`.".format(dbfile))
+
 
     # Make sure we can write to the DB file
-    if not os.access(DBFILE, os.W_OK):
-        print("ERROR: No write access to {}".format(DBFILE))
+    if not os.access(dbfile, os.W_OK):
+        print("ERROR: No write access to database {}".format(dbfile))
         print("Try running this script as the jellyfin user or as an Administrator if you're on Windows.")
         if sys.platform == "linux":
             # Importing PWD here as it's not a module for Windows and this is the only time it's used.
             import pwd
-            print("sudo -u {} {}".format(pwd.getpwuid(os.stat(DBFILE).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
-        exit(100)
+            print("sudo -u {} {}".format(pwd.getpwuid(os.stat(dbfile).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
+        raise Exit("No write access to database file `{}`".format(dbfile))
 
-    with sqlite3.connect(DBFILE) as conn:
+    with sqlite3.connect(dbfile) as conn:
         cur = conn.cursor()
 
         # Get a list of incorrect UserDataKeys
@@ -81,3 +119,29 @@ if __name__ == "__main__":
         cur.execute("UPDATE TypedBaseItems SET ExtraIds=NULL WHERE ExtraIds='';")
 
     print("Done.")
+
+if __name__ == "__main__":
+    try:
+        main(*sys.argv[1:])
+    except Exit:
+        pass
+    except Exception as e:
+        print("""
+An error has occured. Please check
+https://github.com/oddstr13/jellyfin-fixup-scripts/issues
+and submit a new issue if it has not already been reported.
+
+Please include all of the following information in the issue report:
+""")
+        print("Python version: {}".format(platform.python_version()))
+        print("Python implementation: {}".format(platform.python_implementation()))
+        print("Arguments: {!r}".format(sys.argv))
+        print("Platform: {}".format(platform.platform()))
+
+        print()
+        import traceback
+        traceback.print_exc()
+    
+    if is_windows:
+        print()
+        input("Press enter to exit.")
