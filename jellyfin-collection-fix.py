@@ -7,32 +7,48 @@
 import os
 import sys
 import sqlite3
-import pwd
 
-DBFILE = "/var/lib/jellyfin/data/library.db"
 
-def isRunning():
+def isRunningLinux():
     return not os.system("ps axwwo comm --no-headers | grep -i '^jellyfin$' > /dev/null")
 
 if __name__ == "__main__":
-    # Make sure that Jellyfin is not running.
-    if isRunning():
-        print("You should stop jellyfin before running this script.")
-        print("$ systemctl stop jellyfin")
-        exit(50)
+    # See which OS the user is using.
+    if sys.platform in ["win32", "cygwin"]:
+        print("WARNING: ENSURE THAT THE MEDIA SERVER IS SHUTDOWN BEFORE CONTINUING!")
+        print("Please provide the path to your Jellyfin data directory.")
+        print(r"For example, the default path is: {}".format(os.path.join(os.environ['LOCALAPPDATA'], "jellyfin")))
+        print("If you used the default installation path, just hit ENTER.")
+        DBFILE = input("> ") or os.path.join(os.environ['LOCALAPPDATA'], "jellyfin")
+
+        DBFILE = os.path.join(DBFILE, r"data\library.db")
+        if not os.path.exists(DBFILE):
+            print("Could not find database in {}. Are you sure this is the correct path?".format(DBFILE))
+            exit(100)
+    else:
+        DBFILE = "/var/lib/jellyfin/data/library.db"
+
+        # Make sure that Jellyfin is not running if the user is running linux.
+        if isRunningLinux():
+            print("You should stop jellyfin before running this script.")
+            print("$ systemctl stop jellyfin")
+            exit(50)
 
     # Make sure we can write to the DB file
     if not os.access(DBFILE, os.W_OK):
         print("ERROR: No write access to {}".format(DBFILE))
-        print("Try running this script as the jellyfin user:")
-        print("sudo -u {} {}".format(pwd.getpwuid(os.stat(DBFILE).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
+        print("Try running this script as the jellyfin user or as an Administrator if you're on Windows.")
+        if sys.platform == "linux":
+            # Importing PWD here as it's not a module for Windows and this is the only time it's used.
+            import pwd
+            print("sudo -u {} {}".format(pwd.getpwuid(os.stat(DBFILE).st_uid).pw_name, ' '.join([sys.executable] + sys.argv)))
         exit(100)
-
 
     with sqlite3.connect(DBFILE) as conn:
         cur = conn.cursor()
 
         # Get a list of incorrect UserDataKeys
+        print("Building list of incorrect UserDataKeys to fix...")
         res = cur.execute("SELECT tbi2.UserDataKey, tbi2.type, tbi2.ExtraIds FROM TypedBaseItems tbi1 INNER JOIN TypedBaseItems tbi2 ON tbi2.Path = tbi1.Path and tbi1.Guid <> tbi2.Guid WHERE tbi2.ExtraType is not NULL and tbi1.ExtraType is NULL").fetchall()
         blacklist = []
         for item in res:
@@ -41,6 +57,7 @@ if __name__ == "__main__":
                 blacklist.append(item[0])
 
         # Remove the incorrect UserDataKeys from ExtraIds fields
+        print("Removing incorrect UserDataKeys...")
         res = cur.execute("SELECT guid, ExtraIds, Name FROM TypedBaseItems;").fetchall()
         for guid, _eids, name in res:
             if not _eids: continue
